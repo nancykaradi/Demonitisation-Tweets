@@ -1,0 +1,127 @@
+---
+title: "time series"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+system("ls ../Downloads")
+demonetization_tweets <- read_csv("C:/Users/HP/Downloads/demonetization-tweets.csv/demonetization-tweets.csv", 
+    col_types = cols(id = col_character(), 
+        replyToSID = col_character()))
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(plotly)			# ggplot and dependencies
+library(lubridate)		# Timezone conversion
+library(scales)			# Regularly spaced dates (date_breaks)
+library(dplyr)			
+library(stringr)
+summary(cars)
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+```
+# Strip the timestamp into components to see the distribution of tweets over time
+demonetization_tweets$created <- ymd_hms(demonetization_tweets$created)
+# Change to India Timezone from UTC as the user activity seems to be peaking during odd hours otherwise
+demonetization_tweets$created <- with_tz(demonetization_tweets$created, "Asia/Colombo")
+
+# Frequency plot
+ggplot(data = demonetization_tweets, aes(x = demonetization_tweets$created)) +
+    geom_histogram(aes(fill = ..count..), bins=60) +
+    xlab("Time") + ylab("Number of tweets") + labs(title = "Distribution of Tweets over entire duration") +
+    scale_fill_gradient(low = "lightblue", high = "green")
+plot(pressure)
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+# Distribution of tweets by hour of the day (24hr period). I.e. Ignoring number of days, say at 4pm, 5pm, 6pm, etc. how many tweets were there?
+
+demonetization_tweets$timeonly <- as.numeric(demonetization_tweets$created - trunc(demonetization_tweets$created, "days"))
+class(demonetization_tweets$timeonly) <- "POSIXct"
+demonetization_tweets$timeonly <- with_tz(demonetization_tweets$timeonly, "Asia/Colombo")
+
+ggplot(data = demonetization_tweets, aes(x = timeonly)) +
+    geom_histogram(aes(fill = ..count..), bins = 25) +
+    xlab("Time") + ylab("Number of tweets") + labs(title = "Distribution of Tweets over time") + 
+    scale_x_datetime(breaks = date_breaks("3 hours"), labels = date_format("%H:00")) + 
+	scale_fill_gradient(low = "pink", high = "blue")
+	
+# Distribution of Tweets over time of day with "isRetweet" overlay
+ggplot(demonetization_tweets, aes(timeonly)) + 
+    geom_density(aes(fill = isRetweet), alpha = .5) +
+    scale_fill_discrete(guide = 'none') +
+	scale_x_datetime(breaks = date_breaks("3 hours"), labels = date_format("%H:00")) +    
+	xlab('All tweets') + labs(title = "Distribution of Tweets over time of day")
+	
+# Understanding the reply habits of Twitterati's
+Rep2SID <- factor(!is.na(demonetization_tweets$replyToSID))
+dfRep2SID <- as.data.frame(table(Rep2SID))
+
+Reply.Source <- ggplot(demonetization_tweets, aes(factor(!is.na(replyToSID)))) +
+    geom_bar(fill = "midnightblue") +
+	geom_text(data = dfRep2SID, aes(x=Rep2SID, y=Freq, label=Freq), vjust= -0.4, colour = "red", size = 3) +
+    theme(axis.title.x = element_blank()) +
+    ylab("Number of tweets") + 
+    ggtitle("Replied Tweets") +
+    scale_x_discrete(labels=c("No Replies", "Replied tweets"))
+
+Reply.Source + geom_bar(aes(fill = Rep2SID))
+
+# Twitter handles with maximum posts (TOP 10)
+# Cleanup all URLs in statusSource column. In other words, extract all characters between > and < 
+demonetization_tweets$statusSource <- gsub("http[^[:blank:]]+", " ", 
+demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub("[[:punct:]]", " ", demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub(" a ", " ", demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub("[ \t]{2,}", " ", demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub("^\\s+|\\s+$", " ", demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub(" a href rel nofollow ", " ", demonetization_tweets$statusSource)
+demonetization_tweets$statusSource <- gsub(" href rel nofollow ", " ", 
+demonetization_tweets$statusSource)
+
+tweetsBySource <- demonetization_tweets %>%
+    group_by(statusSource) %>%
+    summarize(freqSrc=n()) %>%
+    arrange(desc(freqSrc))
+tweetsBySource.Top <- tweetsBySource[order(-tweetsBySource$freqSrc),]
+tweetsBySource.Top7 <- tweetsBySource.Top[1:7,]
+
+ggplot(tweetsBySource.Top7, aes(sort(tweetsBySource.Top7$statusSource,decreasing = T),tweetsBySource.Top7$freqSrc)) + 
+    geom_bar(stat = "identity", width=0.5) + coord_flip() +
+    geom_text(aes(label=tweetsBySource.Top7$freqSrc), hjust = -0.3, size =3, color = "Blue") +
+    ylab("Number of Tweets") + xlab("Twitter handle") + labs(title = "Top 7 Sources that contribute to maximum posts") +
+    theme(axis.text=element_text(size=10), 
+          axis.title=element_text(size=16, colour = "Green"))
+          
+# Finding the Twitter handles that were the most active or those who had the maximum number of posts
+tweetsPerUser <- demonetization_tweets %>%
+    group_by(screenName) %>%
+    summarize(freq=n()) %>%
+    arrange(desc(freq))
+
+tweetsPerUser.Top <- tweetsPerUser[order(-tweetsPerUser$freq),]
+tweetsPerUser.Top10 <- tweetsPerUser.Top[1:10,]
+
+ggplot(tweetsPerUser.Top10, aes(sort(tweetsPerUser.Top10$screenName,decreasing = T),tweetsPerUser.Top10$freq)) + 
+    geom_bar(stat = "identity", width=0.5) + coord_flip() +
+    geom_text(aes(label=tweetsPerUser.Top10$freq), hjust = 2, size =3, color = "white") +
+    ylab("Number of Tweets") + xlab("Twitter handle") + labs(title = "Twitter handles with maximum posts\n Top 10") +
+    theme(axis.text=element_text(size=10), 
+          axis.title=element_text(size=16, colour = "black"))
